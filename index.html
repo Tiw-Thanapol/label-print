@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ใบปะหน้าพัสดุ</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+<div class="control-panel">
+  <h3>ระบบพิมพ์ใบปะหน้าพัสดุ</h3>
+
+  <div class="seq-row">
+    <label for="startSeqInput">ตั้งเลขที่ออเดอร์เริ่มต้น:</label>
+    <input type="number" id="startSeqInput" min="1" value="1">
+    <button class="secondary" onclick="applyStartSeq()">ตั้งค่า</button>
+  </div>
+
+  <div class="mode-section bulk">
+    <h4>📦 วางออเดอร์หลายรายการพร้อมกัน (แนะนำ)</h4>
+    <textarea id="bulkInput" class="bulk-textarea" placeholder="วางข้อความยอดออเดอร์ทั้งก้อน (คั่นแต่ละออเดอร์ด้วยเส้นประ ---- หรือ —— ก็ได้)"></textarea><br>
+    <button onclick="addBulkOrders()">🔍 แยกออเดอร์ทั้งหมด</button>
+    <p class="hint">
+      ระบบจะแยกแต่ละออเดอร์อัตโนมัติจากเส้นคั่น แล้วดึงชื่อ/ที่อยู่/เบอร์โทร/โน้ตของลูกค้าออกมา
+      โดยมองหาคำว่า "ที่อยู่", "ชื่อ" หรือ "ตต ชื่อไรเดอร์" เป็นจุดเริ่มข้อมูลลูกค้า —
+      ผลลัพธ์จะแสดงให้ตรวจ/แก้ไขก่อนสร้างป้ายจริงเสมอ
+    </p>
+  </div>
+
+  <div id="reviewPanel" class="mode-section review" style="display:none;"></div>
+
+  <div class="mode-section">
+    <h4>✏️ เพิ่มทีละราย (สำหรับข้อมูลที่แยกยาก)</h4>
+    <textarea id="rawInput" placeholder="วางข้อมูลลูกค้าคนเดียว เช่น"></textarea><br>
+    <button onclick="addSingleOrder()">➕ เพิ่มป้ายนี้</button>
+  </div>
+
+  <button onclick="window.print()">🖨️ พิมพ์เอกสารทั้งหมด</button>
+  <button class="danger" onclick="resetAll()">🔄 ล้างป้ายทั้งหมด</button>
+
+  <div id="status"></div>
+</div>
+
+<div id="pagesContainer"></div>
+
+<script src="data.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

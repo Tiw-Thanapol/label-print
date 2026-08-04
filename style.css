@@ -1,0 +1,280 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: "EucrosiaUPC", "TH Sarabun New", sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f0f0f0;
+}
+
+/* ===== ส่วนควบคุม (ซ่อนตอนพิมพ์) ===== */
+.control-panel {
+  padding: 15px;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+  font-family: sans-serif;
+  font-size: 15px;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.control-panel h3 {
+  text-align: center;
+  margin-top: 0;
+}
+
+.control-panel h4 {
+  margin-bottom: 6px;
+}
+
+.mode-section {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.mode-section.bulk {
+  background: #f6fbff;
+  border-color: #bcdfff;
+}
+
+.mode-section.review {
+  background: #fffaf0;
+  border-color: #ffd98e;
+}
+
+.review-item {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.review-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.review-item label {
+  display: block;
+  font-size: 12px;
+  color: #555;
+  margin-top: 6px;
+}
+
+.review-item input[type="text"],
+.review-item textarea {
+  width: 100%;
+  padding: 6px;
+  font-size: 14px;
+  font-family: sans-serif;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+button.small {
+  padding: 4px 10px;
+  font-size: 12px;
+  margin: 0;
+}
+
+textarea {
+  width: 100%;
+  height: 90px;
+  padding: 8px;
+  font-size: 15px;
+  font-family: sans-serif;
+}
+
+textarea.bulk-textarea {
+  height: 150px;
+}
+
+button {
+  padding: 9px 18px;
+  font-size: 15px;
+  cursor: pointer;
+  margin: 4px 4px 4px 0;
+  border: none;
+  border-radius: 6px;
+  background: #2f6fed;
+  color: #fff;
+}
+
+button.secondary {
+  background: #6c757d;
+}
+
+button.danger {
+  background: #d9534f;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+.seq-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.seq-row input[type="number"] {
+  width: 90px;
+  padding: 6px;
+  font-size: 14px;
+}
+
+#status {
+  margin-top: 10px;
+  font-weight: bold;
+  font-family: sans-serif;
+}
+
+.hint {
+  font-size: 12.5px;
+  color: #666;
+  margin: 6px 0 0;
+  text-align: left;
+  line-height: 1.4;
+}
+
+/* ===== หน้า A4 (สร้างซ้ำได้หลายหน้าตามจำนวนออเดอร์) ===== */
+.a4-page {
+  width: 210mm;
+  height: 297mm;
+  padding: 10mm;
+  margin: 0 auto 20px;
+  background: white;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* กล่องปะหน้าแต่ละช่อง */
+.label {
+  position: relative;
+  height: 33.33%;
+  border-bottom: 1px dashed black;
+  padding: 12mm 5mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.a4-page .label:last-child {
+  border-bottom: none;
+}
+
+.label.empty {
+  visibility: hidden;
+}
+
+/* ฝั่งผู้ส่ง (ซ้ายบน) */
+.sender {
+  font-size: 14pt;
+  line-height: 1.35;
+}
+
+/* Order ID + QR code มุมขวาบนของแต่ละป้าย (ไว้เช็คย้อนหลัง) */
+.order-meta {
+  position: absolute;
+  top: 4mm;
+  right: 5mm;
+  text-align: center;
+  font-family: sans-serif;
+}
+
+.order-meta .qr {
+  width: 50px;
+  height: 50px;
+}
+
+.order-meta .qr img,
+.order-meta .qr canvas,
+.order-meta .qr table {
+  width: 50px !important;
+  height: 50px !important;
+}
+
+.order-meta .order-id {
+  font-size: 8pt;
+  margin-top: 2px;
+  color: #333;
+}
+
+/* ฝั่งผู้รับ (เยื้องขวา) */
+.receiver {
+  --indent: 105px; /* ความกว้างจริงของคำว่า "กรุณาส่ง" ที่ 18pt — ทุกบรรทัดอ้างอิงค่าเดียวกัน */
+  --tab: 40px; /* ระยะเยื้องขวาเพิ่มจากขอบซ้ายของกล่อง ปรับตรงนี้ตัวเดียวพอ */
+  font-size: 18pt;
+  line-height: 1.35;
+  align-self: flex-end;
+  width: 78%;
+  padding-left: var(--tab);
+}
+
+.receiver .line1 {
+  display: flex;
+}
+
+.receiver .rlabel {
+  flex: 0 0 var(--indent);
+  white-space: nowrap;
+}
+
+.receiver .namephone {
+  flex: 1;
+  /* ตัดบรรทัดเฉพาะตรงช่องว่าง ไม่ตัดกลางคำไทย
+     ถ้ายาวจริง ๆ จนไม่มีที่ตัด ค่อยยอมล้นแทนการตัดแหว่ง */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.receiver .business {
+  margin-left: var(--indent);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.receiver .address {
+  margin-left: var(--indent);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.receiver .note {
+  margin-left: var(--indent);
+  color: red;
+  word-break: keep-all;
+}
+
+/* ===== ตั้งค่าสำหรับพิมพ์ ===== */
+@media print {
+  @page { size: A4; margin: 0; }
+  body * { visibility: hidden; }
+  #pagesContainer, #pagesContainer * { visibility: visible; }
+  #pagesContainer {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  .a4-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+  }
+  .a4-page:last-child {
+    page-break-after: auto;
+  }
+  .control-panel { display: none; }
+}
