@@ -10,9 +10,8 @@ const PHONE_RE = /0[\d-]{8,10}\d/; // จับเบอร์โทรแบบ
 // คำที่บ่งชี้ว่าเป็นชื่อธุรกิจ/ร้านค้า ใช้แยกออกจากชื่อคนให้เป็นคนละบรรทัด
 const BUSINESS_KEYWORD_RE = /(ร้าน|บริษัท|ห้างหุ้นส่วน|หจก\.?|บจก\.?)/;
 // เบอร์โทร: ต้องไม่ติดกับตัวเลขชุดอื่น (กันไปกินเลขรหัสไปรษณีย์/ราคา)
-const FREEFORM_PHONE_RE = /(?:เบอร์โทร|โทร\.?|Tel\.?)?\s*:?\s*(?<!\d)(0[\d\s-]{7,12}\d)(?!\d)/i;
+const FREEFORM_PHONE_RE = /(?:เบอร์โทร|โทร\.?|T\.?|Tel\.?)?\s*:?\s*(?<!\d)(0[\d\s-]{8,10}\d)(?!\d)/i;
 // คำที่บ่งชี้จุดเริ่มที่อยู่หน่วยงาน/ราชการ/ทหาร ซึ่งมักไม่มีตัวเลขนำหน้าเลย
-// (กันไม่ให้ข้อความพวกนี้ถูกรวมเข้ากับชื่อคนตามกฎ "ตัดชื่อที่ตัวเลขตัวแรก")
 const INSTITUTION_KEYWORD_RE = /(บ้านพัก|ค่ายทหาร|ค่าย|กรม|กองพล|กองร้อย|กองบิน|กอง(?!ทัพ)|สภ\.|สถานีตำรวจ|โรงพัก|ตชด\.|เรือนจำ|ทัณฑสถาน|มณฑลทหารบก|หน่วย|ป้อมตำรวจ|ฐานทัพ)/;
 
 // ------------------------------------------------------------------------
@@ -64,7 +63,6 @@ function normalizeNameTitle(name) {
 }
 
 // รวม logic แยกชื่อคน/ชื่อร้าน + ทำให้ชื่อคนขึ้นต้นด้วย "คุณ" เสมอ
-// (ถ้าทั้งบรรทัดเป็นชื่อร้านล้วน ๆ ไม่มีชื่อคนนำหน้า จะไม่เติม "คุณ" ให้ เพราะไม่ใช่ชื่อคน)
 function resolveNameAndBusiness(rawLine) {
   const split = splitNameAndBusiness(rawLine);
   if (split.personal) {
@@ -111,7 +109,6 @@ function parseCustomerData(raw) {
 
 // ------------------------------------------------------------------------
 // โหมด B: ข้อความก้อนเดียว ไม่มีขึ้นบรรทัดใหม่เลย (ชื่อ+ที่อยู่+เบอร์+โน้ตปนกัน)
-// ใช้ทั้งสำหรับ "เพิ่มทีละราย" แบบวางมั่ว ๆ และหลัง extractShippingBlob() ของโหมดออเดอร์รวม
 // ------------------------------------------------------------------------
 function parseShippingBlob(raw) {
   let working = raw.replace(/\s+/g, " ").trim();
@@ -138,13 +135,21 @@ function parseShippingBlob(raw) {
     ).replace(/\s+/g, " ").trim();
   }
 
-  // ชื่อ = ข้อความก่อนตัวเลขตัวแรก (ชื่อคน/ร้านไม่มีตัวเลข ที่อยู่เริ่มด้วยเลขบ้าน/หมู่)
-  // ยกเว้น: ถ้าเจอคำบ่งชี้ที่อยู่หน่วยงาน (บ้านพักตำรวจ/ค่ายทหาร ฯลฯ) ก่อนถึงตัวเลข
-  // ให้ตัดชื่อที่ตรงนั้นแทน เพราะข้อความหน่วยงานเป็นส่วนหนึ่งของที่อยู่ ไม่ใช่ชื่อคน
-  const firstDigitIdx = working.search(/\d/);
+  // หาตำแหน่งตัดชื่อ โดยมองหาคำที่บ่งบอกถึง "ที่อยู่" ชัดเจน (เช่น บ้านเลขที่, เลขที่, หมู่ ฯลฯ)
+  let nameEndIdx = -1;
+  const addressStartRegex = /(?:บ้านเลขที่|เลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ต\.|อ\.|จ\.))/i;
+  const matchAddrStart = working.search(addressStartRegex);
+
+  if (matchAddrStart !== -1) {
+    nameEndIdx = matchAddrStart;
+  } else {
+    // ถ้าไม่เจอคำชัดเจน ค่อยใช้ตัวเลขตัวแรกตามเดิม
+    nameEndIdx = working.search(/\d/);
+  }
+
+  // เช็คเรื่องหน่วยงานราชการ/ทหารเพิ่มเติม
   const instMatch = working.match(INSTITUTION_KEYWORD_RE);
-  let nameEndIdx = firstDigitIdx;
-  if (instMatch && instMatch.index > 0 && (firstDigitIdx === -1 || instMatch.index < firstDigitIdx)) {
+  if (instMatch && instMatch.index > 0 && (nameEndIdx === -1 || instMatch.index < nameEndIdx)) {
     nameEndIdx = instMatch.index;
   }
 
@@ -184,34 +189,28 @@ function parseShippingBlob(raw) {
 }
 
 // ------------------------------------------------------------------------
-// โหมด C: ก้อนข้อความรวมหลายออเดอร์ คั่นด้วยเส้นประ (----, ——, —- ฯลฯ)
-// แต่ละบล็อกมีรายการสินค้า/ยอดเงิน/ชื่อไรเดอร์("ตต") ปนกับข้อมูลลูกค้า
+// โหมด C: ก้อนข้อความรวมหลายออเดอร์ คั่นด้วยเส้นประ
 // ------------------------------------------------------------------------
 function extractShippingBlob(block) {
-  // ลำดับความสำคัญ: มีคำว่า "ที่อยู่" ระบุไว้ชัดเจน
   let idx = block.search(/ที่อยู่/);
   if (idx !== -1) return block.slice(idx + "ที่อยู่".length).trim();
 
-  // มีคำว่า "ชื่อ" ระบุไว้ชัดเจน
   idx = block.search(/ชื่อ\s/);
   if (idx !== -1) return block.slice(idx + "ชื่อ".length).trim();
 
-  // มีคำว่า "ตต <ไรเดอร์/คำสั่งพิเศษ>" ให้ตัดจากคำถัดไปเป็นข้อมูลลูกค้า
   const ttMatch = block.match(/ตต\s*(\S+)/);
   if (ttMatch) {
     const cutIdx = ttMatch.index + ttMatch[0].length;
     return block.slice(cutIdx).trim();
   }
 
-  // ไม่มี marker เลย: ตัดจากท้ายสุดของคำว่า "รวม"/"รวมทั้งหมด" พร้อมสูตรบวกเลขที่ตามมา (ตัวเลข/เครื่องหมายคำนวณเท่านั้น
-  // ห้ามกวาดตัวอักษร เผื่อชื่อลูกค้าเป็นภาษาอังกฤษต่อท้ายทันที)
   const totalMatches = [...block.matchAll(/รวม(?:ทั้งหมด|ท้ั้งหมด)?[\d\s+=,.]*/g)];
   if (totalMatches.length) {
     const last = totalMatches[totalMatches.length - 1];
     return block.slice(last.index + last[0].length).trim();
   }
 
-  return block; // สุดวิสัย คืนทั้งบล็อก (ดีกว่าไม่ได้อะไรเลย)
+  return block;
 }
 
 function parseBulkOrders(raw) {
@@ -220,8 +219,7 @@ function parseBulkOrders(raw) {
 }
 
 // ------------------------------------------------------------------------
-// ขั้นตอนตรวจสอบ/แก้ไขก่อนสร้างป้ายจริง (สำคัญ: การแยกอัตโนมัติไม่มีทางแม่น 100%
-// เพราะข้อความจากคนพิมพ์แต่ละคนไม่มีมาตรฐานตายตัว จึงต้องให้ตรวจก่อนพิมพ์เสมอ)
+// ขั้นตอนตรวจสอบ/แก้ไขก่อนสร้างป้ายจริง
 // ------------------------------------------------------------------------
 function renderReviewPanel() {
   const panel = document.getElementById("reviewPanel");
@@ -235,8 +233,7 @@ function renderReviewPanel() {
   panel.style.display = "block";
   panel.innerHTML = `
     <h4>🔍 ตรวจสอบก่อนสร้างป้าย (${pendingReview.length} รายการ)</h4>
-    <p class="hint">ระบบแยกข้อมูลให้อัตโนมัติ แต่ถ้าคนพิมพ์ใช้แท็ก/คำย่อแปลก ๆ อาจแยกพลาดได้
-      กรุณาตรวจทุกช่องก่อนกด "ยืนยันและสร้างป้าย"</p>
+    <p class="hint">ระบบแยกข้อมูลให้อัตโนมัติ แต่ถ้าคนพิมพ์ใช้แท็ก/คำย่อแปลก ๆ อาจแยกพลาดได้ กรุณาตรวจทุกช่องก่อนกด "ยืนยันและสร้างป้าย"</p>
     ${pendingReview.map((item, i) => `
       <div class="review-item">
         <div class="review-item-head">
@@ -270,7 +267,6 @@ function removeReviewItem(idx) {
 }
 
 function confirmReview() {
-  // อ่านค่าปัจจุบันจากทุกช่องกลับเข้า pendingReview ก่อนยืนยัน (เผื่อผู้ใช้เพิ่งแก้ไข)
   document.querySelectorAll("#reviewPanel [data-field]").forEach(el => {
     const idx = parseInt(el.dataset.idx, 10);
     const field = el.dataset.field;
@@ -323,7 +319,7 @@ function renderAllPages() {
     return;
   }
 
-  const senderHTML = buildSenderHTML(); // มาจาก data.js
+  const senderHTML = buildSenderHTML();
 
   for (let i = 0; i < orderList.length; i += 3) {
     const pageItems = orderList.slice(i, i + 3);
@@ -353,7 +349,6 @@ function renderAllPages() {
     container.appendChild(page);
   }
 
-  // สร้าง QR code หลังจาก element ถูกแนบเข้า DOM แล้วเท่านั้น
   orderList.forEach(item => {
     const qrEl = document.getElementById("qr-" + item.id);
     if (qrEl && window.QRCode) {
