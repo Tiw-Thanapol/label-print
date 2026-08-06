@@ -23,7 +23,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./   # 👉 ถ้ามี build folder (เช่น dist, build) เปลี่ยนตรงนี้
+          path: ./  
 
   deploy:
     needs: build
@@ -34,6 +34,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5
