@@ -137,7 +137,7 @@ function parseShippingBlob(raw) {
 
   // หาตำแหน่งตัดชื่อ โดยมองหาคำที่บ่งบอกถึง "ที่อยู่" ชัดเจน (เช่น บ้านเลขที่, เลขที่, หมู่ ฯลฯ)
   let nameEndIdx = -1;
-  const addressStartRegex = /(?:บ้านเลขที่|เลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ต\.|อ\.|จ\.))/i;
+  const addressStartRegex = /(?:มบ\.?|เดอะ|The|โครงการ|หมู่บ้าน|บ้านพัก|คอนโด(?:มิเนียม)?|อาคาร|ตึก|เลขที่|บ้านเลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ต\.|อ\.|จ\.))/i;
   const matchAddrStart = working.search(addressStartRegex);
 
   if (matchAddrStart !== -1) {
