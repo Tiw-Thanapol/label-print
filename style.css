@@ -1,10 +1,12 @@
 * { box-sizing: border-box; }
 
 body {
-  font-family: "EucrosiaUPC", "TH Sarabun New", sans-serif;
+  font-family: "EucrosiaUPC", "TH Sarabun New", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
   margin: 0;
   padding: 0;
   background-color: #f0f0f0;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* ===== ส่วนควบคุม (ซ่อนตอนพิมพ์) ===== */
@@ -44,45 +46,6 @@ body {
 .mode-section.review {
   background: #fffaf0;
   border-color: #ffd98e;
-}
-
-/* ===== เพิ่มเติม: สไตล์สำหรับส่วนตั้งค่าผู้ส่ง ===== */
-.mode-section.sender-section {
-  background: #f8f9fa;
-  border-color: #ced4da;
-}
-
-.sender-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.sender-grid .full-width {
-  grid-column: span 2;
-}
-
-.sender-grid label {
-  display: block;
-  font-size: 12px;
-  color: #555;
-  margin-bottom: 2px;
-}
-
-.sender-grid input[type="text"] {
-  width: 100%;
-  padding: 6px;
-  font-size: 14px;
-  font-family: sans-serif;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.sender-actions {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
 }
 
 .review-item {
@@ -208,6 +171,8 @@ button:hover {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  /* บังคับฟอนต์ในส่วนใบปะหน้าไม่ให้โดนมือถือเปลี่ยนค่าดีฟอลต์ */
+  font-family: "EucrosiaUPC", "TH Sarabun New", "Sarabun", sans-serif !important;
 }
 
 .a4-page .label:last-child {
@@ -253,8 +218,8 @@ button:hover {
 
 /* ฝั่งผู้รับ (เยื้องขวา) */
 .receiver {
-  --indent: 105px; /* ความกว้างจริงของคำว่า "กรุณาส่ง" ที่ 18pt — ทุกบรรทัดอ้างอิงค่าเดียวกัน */
-  --tab: 40px; /* ระยะเยื้องขวาเพิ่มจากขอบซ้ายของกล่อง ปรับตรงนี้ตัวเดียวพอ */
+  --indent: 105px; /* ความกว้างจริงของคำว่า "กรุณาส่ง" ที่ 18pt */
+  --tab: 40px; /* ระยะเยื้องขวาเพิ่มจากขอบซ้ายของกล่อง */
   font-size: 18pt;
   line-height: 1.35;
   align-self: flex-end;
@@ -273,8 +238,6 @@ button:hover {
 
 .receiver .namephone {
   flex: 1;
-  /* ตัดบรรทัดเฉพาะตรงช่องว่าง ไม่ตัดกลางคำไทย
-     ถ้ายาวจริง ๆ จนไม่มีที่ตัด ค่อยยอมล้นแทนการตัดแหว่ง */
   word-break: keep-all;
   overflow-wrap: break-word;
 }
