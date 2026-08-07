@@ -1,12 +1,17 @@
+
 * { box-sizing: border-box; }
 
 body {
-  font-family: "EucrosiaUPC", "TH Sarabun New", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-family: "Sarabun", sans-serif !important;
   margin: 0;
   padding: 0;
   background-color: #f0f0f0;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+.label {
+  font-family: "Sarabun", sans-serif !important;
 }
 
 /* ===== ส่วนควบคุม (ซ่อนตอนพิมพ์) ===== */
@@ -15,7 +20,7 @@ body {
   background: #fff;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
   margin-bottom: 20px;
-  font-family: sans-serif;
+  font-family: 'THSarabun',sans-serif;
   font-size: 15px;
   max-width: 700px;
   margin-left: auto;
@@ -164,17 +169,25 @@ button:hover {
 
 /* กล่องปะหน้าแต่ละช่อง */
 .label {
-  position: relative;
-  height: 33.33%;
-  border-bottom: 1px dashed black;
-  padding: 12mm 5mm;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  /* บังคับฟอนต์ในส่วนใบปะหน้าไม่ให้โดนมือถือเปลี่ยนค่าดีฟอลต์ */
-  font-family: "EucrosiaUPC", "TH Sarabun New", "Sarabun", sans-serif !important;
+position: relative;
+height: 33.33%;
+border-bottom: 1px dashed black;
+padding: 12mm 5mm;
+display: flex;
+flex-direction: column;
+justify-content: space-between;
 }
+.receiver {
+  --indent: 105px;
+  --tab: 40px;
 
+  font-family: "Sarabun", sans-serif !important;
+  font-size: 18pt;
+  line-height: 1.35;
+  align-self: flex-end;
+  width: 78%;
+  padding-left: var(--tab);
+}
 .a4-page .label:last-child {
   border-bottom: none;
 }
@@ -185,8 +198,9 @@ button:hover {
 
 /* ฝั่งผู้ส่ง (ซ้ายบน) */
 .sender {
-  font-size: 14pt;
-  line-height: 1.35;
+font-family: "Sarabun", sans-serif !important;
+font-size: 14pt;
+line-height: 1.35;
 }
 
 /* Order ID + QR code มุมขวาบนของแต่ละป้าย (ไว้เช็คย้อนหลัง) */

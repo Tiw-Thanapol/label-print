@@ -1,5 +1,7 @@
 // ========================================================================
 // ระบบพิมพ์ใบปะหน้าพัสดุ — รองรับวางออเดอร์หลายรายการพร้อมกัน + Order ID/QR
+// (ฉบับแก้ไข: ตัดส่วน "รายการสินค้า + ส่ง XX" ออกก่อนแยกชื่อ,
+//  รู้จักเบอร์โทรที่เขียนในวงเล็บ [ ], และรู้จักคำย่อ "ม." = หมู่)
 // ========================================================================
 
 let orderList = [];      // { id, data } ทั้งหมดที่จะพิมพ์ (สะสมได้เรื่อย ๆ)
@@ -13,6 +15,11 @@ const BUSINESS_KEYWORD_RE = /(ร้าน|บริษัท|ห้างหุ
 const FREEFORM_PHONE_RE = /(?:เบอร์โทร|โทร\.?|T\.?|Tel\.?)?\s*:?\s*(?<!\d)(0[\d\s-]{8,10}\d)(?!\d)/i;
 // คำที่บ่งชี้จุดเริ่มที่อยู่หน่วยงาน/ราชการ/ทหาร ซึ่งมักไม่มีตัวเลขนำหน้าเลย
 const INSTITUTION_KEYWORD_RE = /(บ้านพัก|ค่ายทหาร|ค่าย|กรม|กองพล|กองร้อย|กองบิน|กอง(?!ทัพ)|สภ\.|สถานีตำรวจ|โรงพัก|ตชด\.|เรือนจำ|ทัณฑสถาน|มณฑลทหารบก|หน่วย|ป้อมตำรวจ|ฐานทัพ)/;
+// จุดเริ่มของที่อยู่ (เติม "ม." ซึ่งเป็นคำย่อของ "หมู่" เข้ามาแล้ว)
+const ADDRESS_START_RE = /(?:บ้านเลขที่|เลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ม\.|ต\.|อ\.|จ\.))/i;
+// บรรทัดค่าส่ง เช่น "ส่ง 50" / "ส่ง60" — ใช้ตัดส่วน "รายการสินค้า" ทิ้งก่อนถึงข้อมูลลูกค้า
+// ต้องขึ้นต้นบรรทัดจริง ๆ (อนุญาตช่องว่างนำหน้า) กันไปชนคำว่า "จัดส่ง"
+const SHIPPING_FEE_LINE_RE = /^[ \t]*ส่ง[ \t]*\d+.*$/m;
 
 // ------------------------------------------------------------------------
 // Order ID
@@ -53,8 +60,14 @@ function normalizePhoneDigits(rawPhone) {
     : digits;
 }
 
+// เช็คว่าข้อความเป็นเบอร์โทรไทยไหม (ใช้ตอนตัดสินใจว่าของใน [ ] คือเบอร์หรือโน้ต)
+function looksLikePhoneNumber(text) {
+  const digits = text.replace(/[^\d]/g, "");
+  return /^0\d{8,9}$/.test(digits);
+}
+
 // ตัดคำนำหน้าชื่อทุกแบบทิ้ง แล้วขึ้นต้นด้วย "คุณ" ให้เหมือนกันหมดทุกคน
-const TITLE_RE = /^(นางสาว|นาย|นาง|น\.ส\.|ดร\.|นพ\.|พญ\.|ด\.ช\.|ด\.ญ\.|คุณหญิง|คุณ|Mrs\.?|Mr\.?|Miss\.?|Ms\.?|Dr\.?|K\.)\s*/i;
+const TITLE_RE = /^(นางสาว|นาย|นาง|น\.ส\.|ดร\.|นพ\.|พญ\.|ด\.ช\.|ด\.ญ\.|คุณหญิง|จัดส่ง|กรุณาจัดส่ง|ส่ง|คุณ|Mrs\.?|Mr\.?|Miss\.?|Ms\.?|Dr\.?|K\.)\s*/i;
 
 function normalizeNameTitle(name) {
   if (!name) return name;
@@ -83,26 +96,30 @@ function parseCustomerData(raw) {
   let note = "";
   const address = [];
 
-  lines.forEach(line => {
-    const phoneMatch = line.match(PHONE_RE);
-    if (phoneMatch && (line.replace(/[^0-9]/g, "").length >= 9)) {
-      phone = phoneMatch[0];
-      const rest = line.replace(PHONE_RE, "").replace(/โทร\.?:?/gi, "").trim();
-      if (rest && !name) {
-        const resolved = resolveNameAndBusiness(rest);
-        name = resolved.name;
-        business = resolved.business;
-      }
-    } else if (line.includes("[") && line.includes("]")) {
-      note = line.replace(/^\[|\]$/g, "");
-    } else if (!name) {
-      const resolved = resolveNameAndBusiness(line);
-      name = resolved.name;
-      business = resolved.business;
-    } else {
-      address.push(line);
-    }
-  });
+  lines.forEach((line, idx) => {
+  const phoneMatch = line.match(PHONE_RE);
+
+  if (phoneMatch) {
+    phone = phoneMatch[0];
+
+    // ❌ ไม่ใช้ line นี้เป็นชื่ออีกต่อไป
+    return;
+  }
+
+  if (line.includes("[") && line.includes("]")) {
+    note = line.replace(/^\[|\]$/g, "");
+    return;
+  }
+
+  if (!name) {
+    const resolved = resolveNameAndBusiness(line);
+    name = resolved.name;
+    business = resolved.business;
+    return;
+  }
+
+  address.push(line);
+});
 
   return { name, business, phone, note: note ? `[${note}]` : "", address };
 }
@@ -113,32 +130,41 @@ function parseCustomerData(raw) {
 function parseShippingBlob(raw) {
   let working = raw.replace(/\s+/g, " ").trim();
 
+  let phone = "";
+
   // ดึงโน้ตที่มี [ ] อยู่แล้วออกก่อน กันซ้อนวงเล็บ
+  // แต่ต้องเช็คก่อนว่าข้างในเป็น "เบอร์โทร" ที่คนพิมพ์ใส่วงเล็บไว้หรือเปล่า
+  // (ไม่งั้นเบอร์จะถูกเข้าใจผิดว่าเป็นโน้ต แล้วช่องเบอร์จะว่างเปล่า)
   let bracketNote = "";
   const bracketMatch = working.match(/\[([^\]]+)\]/);
   if (bracketMatch) {
-    bracketNote = bracketMatch[1].trim();
+    const bracketContent = bracketMatch[1].trim();
+    if (looksLikePhoneNumber(bracketContent)) {
+      phone = normalizePhoneDigits(bracketContent);
+    } else {
+      bracketNote = bracketContent;
+    }
     working = (
       working.slice(0, bracketMatch.index) + " " +
       working.slice(bracketMatch.index + bracketMatch[0].length)
     ).replace(/\s+/g, " ").trim();
   }
 
-  // ดึงเบอร์โทร (ไม่ว่าจะอยู่ตรงไหนของประโยค)
-  let phone = "";
-  const phoneMatch = working.match(FREEFORM_PHONE_RE);
-  if (phoneMatch) {
-    phone = normalizePhoneDigits(phoneMatch[1]);
-    working = (
-      working.slice(0, phoneMatch.index) + " " +
-      working.slice(phoneMatch.index + phoneMatch[0].length)
-    ).replace(/\s+/g, " ").trim();
+  // ดึงเบอร์โทร (ไม่ว่าจะอยู่ตรงไหนของประโยค) — ข้ามถ้าได้เบอร์จากวงเล็บไปแล้ว
+  if (!phone) {
+    const phoneMatch = working.match(FREEFORM_PHONE_RE);
+    if (phoneMatch) {
+      phone = normalizePhoneDigits(phoneMatch[1]);
+      working = (
+        working.slice(0, phoneMatch.index) + " " +
+        working.slice(phoneMatch.index + phoneMatch[0].length)
+      ).replace(/\s+/g, " ").trim();
+    }
   }
 
   // หาตำแหน่งตัดชื่อ โดยมองหาคำที่บ่งบอกถึง "ที่อยู่" ชัดเจน (เช่น บ้านเลขที่, เลขที่, หมู่ ฯลฯ)
   let nameEndIdx = -1;
-  const addressStartRegex = /(?:มบ\.?|เดอะ|The|โครงการ|หมู่บ้าน|บ้านพัก|คอนโด(?:มิเนียม)?|อาคาร|ตึก|เลขที่|บ้านเลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ต\.|อ\.|จ\.))/i;
-  const matchAddrStart = working.search(addressStartRegex);
+  const matchAddrStart = working.search(ADDRESS_START_RE);
 
   if (matchAddrStart !== -1) {
     nameEndIdx = matchAddrStart;
@@ -202,6 +228,13 @@ function extractShippingBlob(block) {
   if (ttMatch) {
     const cutIdx = ttMatch.index + ttMatch[0].length;
     return block.slice(cutIdx).trim();
+  }
+
+  // ตัดส่วน "รายการสินค้า" ทิ้ง โดยหาบรรทัดค่าส่งแบบ "ส่ง <ตัวเลข>"
+  // แพทเทิร์นนี้ครอบคลุมข้อมูลแบบ: รายการสินค้า(หลายบรรทัด) -> ส่ง XX -> บรรทัดว่าง -> ข้อมูลลูกค้า
+  const shipFeeMatch = block.match(SHIPPING_FEE_LINE_RE);
+  if (shipFeeMatch) {
+    return block.slice(shipFeeMatch.index + shipFeeMatch[0].length).trim();
   }
 
   const totalMatches = [...block.matchAll(/รวม(?:ทั้งหมด|ท้ั้งหมด)?[\d\s+=,.]*/g)];
