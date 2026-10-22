@@ -27,7 +27,7 @@ let pendingReview = [];  // { data } ที่แยกแล้วแต่ย�
 
 // ตั้งเป็น false ถ้าอยากให้ชื่อเล่นในวงเล็บท้ายชื่อ เช่น "ธนพร แก่นกอ (เตย)" ขึ้นบนป้ายด้วย
 const STRIP_NAME_NICKNAME = false;
-const LABELS_PER_PAGE = 4;
+
 // ------------------------------------------------------------------------
 // Regex กลาง
 // ------------------------------------------------------------------------
@@ -537,8 +537,8 @@ function renderAllPages() {
 
   const senderHTML = buildSenderHTML();
 
-  for (let i = 0; i < orderList.length; i += LABELS_PER_PAGE) {
-    const pageItems = orderList.slice(i, i + LABELS_PER_PAGE);
+  for (let i = 0; i < orderList.length; i += 3) {
+    const pageItems = orderList.slice(i, i + 3);
     const page = document.createElement("div");
     page.className = "a4-page";
 
@@ -556,7 +556,7 @@ function renderAllPages() {
       page.appendChild(labelDiv);
     });
 
-    while (page.children.length < LABELS_PER_PAGE) {
+    while (page.children.length < 3) {
       const empty = document.createElement("div");
       empty.className = "label empty";
       page.appendChild(empty);
@@ -584,7 +584,7 @@ function renderAllPages() {
 }
 
 function updateStatus() {
-  const pageCount = Math.ceil(orderList.length / LABELS_PER_PAGE) || 0;
+  const pageCount = Math.ceil(orderList.length / 3) || 0;
   document.getElementById("status").innerText =
     orderList.length === 0
       ? "ยังไม่มีป้าย — เลขที่ออเดอร์ถัดไป: " + nextOrderIdPreview()
