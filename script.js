@@ -1,219 +1,334 @@
 // ========================================================================
 // ระบบพิมพ์ใบปะหน้าพัสดุ — รองรับวางออเดอร์หลายรายการพร้อมกัน + Order ID/QR
-// (ฉบับแก้ไข: ตัดส่วน "รายการสินค้า + ส่ง XX" ออกก่อนแยกชื่อ,
-//  รู้จักเบอร์โทรที่เขียนในวงเล็บ [ ], และรู้จักคำย่อ "ม." = หมู่)
+// ฉบับรวมแก้ทั้งหมด (v3) — ดูรายการ "FIX" ท้ายไฟล์คอมเมนต์นี้
 //
-// >>> รอบนี้แก้เพิ่ม 3 จุด (ดูคอมเมนต์ "FIX:" ในโค้ด) <<<
-//   1) บรรทัดค่าส่งรองรับคำว่า "วิน" ไม่ใช่แค่ "ส่ง"
-//   2) รองรับเบอร์โทรที่เขียนในวงเล็บกลม ( ) ไม่ใช่แค่วงเล็บเหลี่ยม [ ]
-//   3) รองรับคำนำหน้าเบอร์ "เบอร์" เดี่ยว ๆ ไม่ใช่แค่ "เบอร์โทร"
+// แก้จากรอบก่อน (ตัวเลขอ้างอิงตรงกับคอมเมนต์ "FIX:" ในโค้ด)
+//  #1  "วิน" นับเป็นบรรทัดค่าส่ง (+ ส่งฟรี / ค่าส่ง / Grab / Lalamove ...)
+//  #2  เบอร์ในวงเล็บกลม ( ) — วนทุกคู่วงเล็บ ไม่ใช่แค่คู่แรก
+//  #3  คำนำหน้าเบอร์: เบอร์ / โทร / โทรศัพท์ / มือถือ / T. / Tel. / +66
+//  #4  วงเล็บ [ ] = โน้ต, ( ) = เอาออกเฉพาะที่เป็นเบอร์จริง
+//  #5  "มบ" (สมบูรณ์) / "The" (Matthew) / "ตต" (ปัตตานี) / TITLE (Drew) ไม่โดนตัดกลางคำอีก
+//  #6  parseCustomerData ไม่ทิ้งชื่อเมื่อเบอร์อยู่บรรทัดเดียวกัน
+//  #7  "รวม" ไม่กินเลขบ้านบรรทัดถัดไป / ไม่ตัดที่อยู่ที่มีคำว่า รวมใจ
+//  #8  ล้าง ":" หน้าข้อมูล, รับ "ที่อยุ่" (พิมพ์ผิด), รับ "ชื่อ ... ที่อยู่ ..."
+//  #9  หน้า Review ไม่ทำค่าที่แก้ไว้หาย (syncReviewFromDOM)
+//  #10 บรรทัด "xxx ส่งที่" ไม่ใช่ชื่อ / "ส่ง <สถานที่>" เป็นจุดเริ่มที่อยู่
+//  #11 ที่อยู่แบบ Google Maps (ตำบล/อำเภอ/แขวง/เขต + รหัสไปรษณีย์กลางประโยค)
+//  #12 ข้ามก้อนที่ไม่ใช่ออเดอร์ (ไม่มีทั้งเบอร์และที่อยู่) แล้วแจ้งผู้ใช้
+//  #13 ชื่อร้านภาษาอังกฤษ/ชื่อคอนโดที่ไม่มีคำว่า "ร้าน" แยกเป็น business
+//  #14 เลข Order ID เก็บใน localStorage + รีเซ็ตข้ามวัน
+//  #15 escape HTML, โน้ตไม่หาย, เบอร์บ้าน 9 หลัก, QR ใหญ่ขึ้น ฯลฯ
 // ========================================================================
 
-let orderList = [];      // { id, data } ทั้งหมดที่จะพิมพ์ (สะสมได้เรื่อย ๆ)
-let orderSeqCounter = 1;  // เลขที่ออเดอร์ถัดไปที่จะออก
-let pendingReview = [];   // { data } ที่แยกได้แล้วแต่ยังไม่ยืนยัน รอแก้ไขก่อนสร้างป้ายจริง
+let orderList = [];      // { id, data } ทั้งหมดที่จะพิมพ์
+let orderSeqCounter = 1; // เลขลำดับถัดไปของ "วันนี้"
+let orderSeqDate = "";   // วันที่ของ orderSeqCounter (YYYYMMDD)
+let pendingReview = [];  // { data } ที่แยกแล้วแต่ยังไม่ยืนยัน
 
-const PHONE_RE = /0[\d-]{8,10}\d/; // จับเบอร์โทรแบบ 0xxxxxxxxx หรือ 0xx-xxxxxxx
-// คำที่บ่งชี้ว่าเป็นชื่อธุรกิจ/ร้านค้า ใช้แยกออกจากชื่อคนให้เป็นคนละบรรทัด
+// ตั้งเป็น false ถ้าอยากให้ชื่อเล่นในวงเล็บท้ายชื่อ เช่น "ธนพร แก่นกอ (เตย)" ขึ้นบนป้ายด้วย
+const STRIP_NAME_NICKNAME = false;
+const LABELS_PER_PAGE = 4;
+// ------------------------------------------------------------------------
+// Regex กลาง
+// ------------------------------------------------------------------------
+
+// เบอร์โทรไทย: มือถือ 0xx-xxx-xxxx (10 หลัก) / เบอร์บ้าน 0x-xxx-xxxx (9 หลัก)
+// FIX (#15): เดิมใช้ [\d\s-]{8,10} ซึ่งยอมให้ช่องว่างอยู่กลางเบอร์ จึงอาจกินเลขที่ตามหลังเข้าไป
+//            ตอนนี้บังคับโครงสร้างเบอร์จริง ๆ
+const PHONE_CORE = "0\\d{1,2}[\\s-]?\\d{3}[\\s-]?\\d{3,4}";
+// FIX (#3): เบอร์โทรศัพท์ / เบอร์โทร / เบอร์ / โทรศัพท์ / โทร / มือถือ / T. / Tel.
+// (T/Tel ต้องไม่ติดหลังตัวอักษรอังกฤษ ไม่งั้น "Matt 0812..." จะโดนกิน t ท้ายชื่อ)
+const PHONE_PREFIX =
+  "(?:เบอร์โทรศัพท์|เบอร์โทร|เบอร์|โทรศัพท์|โทร\\.?|มือถือ|(?<![A-Za-z])(?:Tel|T)\\.?)";
+const FREEFORM_PHONE_RE = new RegExp(
+  `(?:${PHONE_PREFIX})?\\s*:?\\s*(?<!\\d)(${PHONE_CORE})(?!\\d)`, "i"
+);
+const PHONE_ONLY_RE = new RegExp(`^(?:${PHONE_PREFIX})?\\s*:?\\s*${PHONE_CORE}$`, "i");
+
+// คำที่บ่งชี้ว่าเป็นชื่อธุรกิจ/ร้านค้า
 const BUSINESS_KEYWORD_RE = /(ร้าน|บริษัท|ห้างหุ้นส่วน|หจก\.?|บจก\.?)/;
-// เบอร์โทร: ต้องไม่ติดกับตัวเลขชุดอื่น (กันไปกินเลขรหัสไปรษณีย์/ราคา)
-// FIX (#3): เพิ่ม "เบอร์" เดี่ยว ๆ เข้าไปในคำนำหน้าที่รู้จัก (เดิมรู้จักแค่ "เบอร์โทร" เต็ม ๆ)
-const FREEFORM_PHONE_RE = /(?:เบอร์โทร|เบอร์|โทร\.?|T\.?|Tel\.?)?\s*:?\s*(?<!\d)(0[\d\s-]{8,10}\d)(?!\d)/i;
-// คำที่บ่งชี้จุดเริ่มที่อยู่หน่วยงาน/ราชการ/ทหาร ซึ่งมักไม่มีตัวเลขนำหน้าเลย
-const INSTITUTION_KEYWORD_RE = /(บ้านพัก|มหาวิทยาลัย|วิทยาลัย|สถาบัน|โรงเรียน|ค่ายทหาร|ค่าย|กรม|กองพล|กองร้อย|กองบิน|กอง(?!ทัพ)|สภ\.|สถานีตำรวจ|โรงพัก|ตชด\.|เรือนจำ|ทัณฑสถาน|มณฑลทหารบก|หน่วย|ป้อมตำรวจ|ฐานทัพ)/;
-// จุดเริ่มของที่อยู่
-// - เดิมจับได้แค่กรณีที่อยู่ขึ้นต้นด้วยตัวเลข (เลขที่/หมู่/เลขบ้าน) เท่านั้น
-// - เพิ่มคำที่ใช้ขึ้นต้นที่อยู่แบบไม่มีตัวเลขนำหน้าเลยด้วย เช่น "โครงการ...", "หมู่บ้าน...",
-//   "คอนโด...", "เดอะ..." ไม่งั้นที่อยู่แบบนี้จะไม่ถูกตัดออกจากชื่อเลย
-// - ยังคง "ม." (คำย่อของ "หมู่") ไว้ในกลุ่มเลขบ้าน เพื่อจับเคสแบบ "54 ม.4 ต.จันทนิมิต..." ให้แม่นยำ
-//   โดยไม่ต้องพึ่ง fallback หาตัวเลขตัวแรกเฉย ๆ (ซึ่งเสี่ยงพลาดถ้าในชื่อมีตัวเลขปนอยู่ก่อน)
-const ADDRESS_START_RE = /(?:มบ\.?|เดอะ|The|โครงการ|หมู่บ้าน|บ้านพัก|คอนโด(?:มิเนียม)?|อาคาร|ตึก|บ้านเลขที่|เลขที่|หมู่ที่|หมู่\s+|\b\d{1,3}\/\d+|\b\d{1,4}\s+(?:ซอย|ถนน|หมู่|ม\.|ต\.|อ\.|จ\.))/i;
-// บรรทัดค่าส่ง เช่น "ส่ง 50" / "ส่ง60" / "วิน 50" / "วิน60"
-// — ใช้ตัดส่วน "รายการสินค้า" ทิ้งก่อนถึงข้อมูลลูกค้า
-// ต้องขึ้นต้นบรรทัดจริง ๆ (อนุญาตช่องว่างนำหน้า) กันไปชนคำว่า "จัดส่ง"
-// FIX (#1): เพิ่ม "วิน" (ค่าส่งวินมอเตอร์ไซค์) เข้าไปด้วย เพราะเดิมรู้จักแค่ "ส่ง" อย่างเดียว
-//           ทำให้ตอนที่คนพิมพ์ใช้คำว่า "วิน 60" ระบบตัดรายการสินค้าออกไม่ได้เลย
-//           แล้วเอาทั้งก้อน (รวมชื่อสินค้า/emoji) ไปพยายามแยกเป็นชื่อ-ที่อยู่ลูกค้า จึงมั่ว
-const SHIPPING_FEE_LINE_RE = /^[ \t]*(?:ส่ง|วิน)[ \t]*\d+.*$/m;
+
+// FIX (#13): ชื่อสถานที่/ร้านที่ไม่มีคำว่า "ร้าน"
+const ENGLISH_VENUE_RE =
+  /(mansion|condo|apartment|house|home|place|residence|tower|park|village|hotel|resort|shop|store|cafe|coffee|studio|bar|office|building|clinic|co\.|ltd|company)/i;
+const THAI_VENUE_RE =
+  /(แอนด์|เฮ้าท์|เฮ้าส์|เฮาส์|คอนโด|แมนชั่น|อพาร์ท|ออฟฟิศ|สตูดิโอ|คาเฟ่|ฟาร์ม|สปา|ซาลอน|คลินิก|เพลส|เรสซิเดนซ์|พาร์ค|วิลล่า|รีสอร์ท|โฮสเทล|โฮม)/;
+
+// FIX (#15): หน่วยงาน — ต้องขึ้นต้นคำ (หลังช่องว่าง) และไม่ใช้ "กอง"/"กรม" ลอย ๆ
+//            กันนามสกุลอย่าง กองทอง กองแก้ว กรมสุข
+const INSTITUTION_KEYWORD_RE = new RegExp(
+  "(?<=^|\\s)(?:" + [
+    "บ้านพัก", "มหาวิทยาลัย", "วิทยาลัย", "สถาบัน", "โรงเรียน", "ค่ายทหาร", "ค่าย(?=\\s)",
+    "กรม(?:ทหาร|ตำรวจ|ทางหลวง|ที่ดิน|ศุลกากร|สรรพากร|ธนารักษ์|ราชทัณฑ์|การปกครอง)",
+    "กองพล", "กองร้อย", "กองพัน", "กองบิน", "กองบัญชาการ", "กองกำลัง",
+    "สภ\\.", "สถานีตำรวจ", "โรงพัก", "ตชด\\.", "เรือนจำ", "ทัณฑสถาน",
+    "มณฑลทหารบก", "หน่วย", "ป้อมตำรวจ", "ฐานทัพ"
+  ].join("|") + ")"
+);
+
+// จุดเริ่มของที่อยู่ (ตำแหน่งแรกที่เจอ = ตัดชื่อตรงนั้น)
+// FIX (#5): "มบ." ต้องมีจุดและห้ามมีอักษรไทยนำหน้า (สมบูรณ์/สมบัติ ไม่โดน)
+// FIX (#5): "The" ต้องเป็นคำเต็ม (Matthew/Catherine ไม่โดน)
+// FIX (#11): เพิ่ม ตำบล/อำเภอ/แขวง/เขต/จังหวัด เมื่อขึ้นต้นคำ
+// FIX (#10): "ส่ง" ที่มีช่องว่างล้อม = ส่ง <สถานที่> เช่น "ส่ง Mr.bag ..."
+// FIX (#15): เลขบ้านติดกับ หมู่/ม. ได้ เช่น "309หมู่10"
+const ADDRESS_START_RE = new RegExp([
+  "(?<![ก-๙])มบ\\.",
+  "(?<![A-Za-z])The(?![A-Za-z])",
+  "เดอะ",
+  "โครงการ", "หมู่บ้าน", "บ้านพัก",
+  "คอนโด(?:มิเนียม)?", "อาคาร", "ตึก",
+  "บ้านเลขที่", "เลขที่", "หมู่ที่", "หมู่\\s+",
+  "\\b\\d{1,3}\\/\\d+",
+  "\\b\\d{1,4}\\s*(?:ซอย|ถนน|หมู่|ม\\.|ต\\.|อ\\.|จ\\.)",
+  "(?<=^|\\s)(?:ตำบล|อำเภอ|แขวง|เขต|จังหวัด)",
+  "(?<=\\s)ส่ง(?=\\s)"
+].join("|"), "i");
+
+// บรรทัดค่าส่ง — ใช้ตัดรายการสินค้าทิ้ง
+// FIX (#1): วิน / FIX (#15): ส่งฟรี, ค่าส่ง, Grab, Lalamove, Bolt, Line man
+// ตัวเลขต้องไม่ตามด้วย "/" เพื่อไม่ชนที่อยู่ที่ขึ้นต้นว่า "ส่ง 123/4 ..."
+const SHIPPING_FEE_LINE_RE =
+  /^[ \t]*(?:ค่าส่ง|ส่ง|วิน|Grab|Lalamove|Bolt|Line\s*man|ไลน์แมน)[ \t]*(?:ฟรี|\d+(?![\d/])).*$/im;
+
+// คำนำหน้าชื่อ — ตัดทิ้งแล้วเติม "คุณ" ให้เหมือนกันหมด
+// FIX (#5): คำนำหน้าไทยห้ามตามด้วยสระ/วรรณยุกต์ (คุณากร, คุณาพร ไม่โดนตัด)
+//           คำอังกฤษต้องตามด้วยจุดหรือช่องว่าง (Drew, Mrinal ไม่โดนตัด)
+const THAI_NON_LEADING = "(?![ะัาำิีึืฺุู็่้๊๋์ํ])";
+const TITLE_RE = new RegExp(
+  "^(?:" +
+    "(?:นางสาว|นาย|นาง|คุณหญิง|คุณ)" + THAI_NON_LEADING + "|" +
+    "น\\.ส\\.|ดร\\.|นพ\\.|พญ\\.|ด\\.ช\\.|ด\\.ญ\\.|" +
+    "(?:กรุณาจัดส่ง|จัดส่ง|ส่ง)(?=\\s|คุณ)|" +
+    "(?:Mrs|Mr|Miss|Ms|Dr)(?:\\.\\s*|\\s+)|K\\.\\s*" +
+  ")\\s*", "i"
+);
 
 // ------------------------------------------------------------------------
-// Order ID
+// Order ID  (FIX #14: เก็บใน localStorage + รีเซ็ตข้ามวันอัตโนมัติ)
 // ------------------------------------------------------------------------
-function nextOrderId() {
+const SEQ_STORAGE_KEY = "labelSystem.seq";
+
+function todayStr() {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const id = `${y}${m}${d}-${String(orderSeqCounter).padStart(3, "0")}`;
+  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function loadSeq() {
+  orderSeqDate = todayStr();
+  orderSeqCounter = 1;
+  try {
+    if (typeof localStorage === "undefined") return;
+    const s = JSON.parse(localStorage.getItem(SEQ_STORAGE_KEY) || "null");
+    if (s && s.date === orderSeqDate && s.seq >= 1) orderSeqCounter = s.seq;
+  } catch (e) { /* ใช้ค่าเริ่มต้น */ }
+}
+
+function saveSeq() {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(SEQ_STORAGE_KEY, JSON.stringify({ date: orderSeqDate, seq: orderSeqCounter }));
+  } catch (e) { /* ไม่เป็นไร */ }
+}
+
+function ensureToday() {
+  const t = todayStr();
+  if (t !== orderSeqDate) { orderSeqDate = t; orderSeqCounter = 1; saveSeq(); }
+}
+
+function nextOrderId() {
+  ensureToday();
+  const id = `${orderSeqDate}-${String(orderSeqCounter).padStart(3, "0")}`;
   orderSeqCounter++;
+  saveSeq();
   return id;
+}
+
+function nextOrderIdPreview() {
+  ensureToday();
+  return `${orderSeqDate}-${String(orderSeqCounter).padStart(3, "0")}`;
 }
 
 function applyStartSeq() {
   const val = parseInt(document.getElementById("startSeqInput").value, 10);
+  ensureToday();
   orderSeqCounter = isNaN(val) || val < 1 ? 1 : val;
+  saveSeq();
   updateStatus();
 }
 
 // ------------------------------------------------------------------------
-// ตัวช่วยแยกชื่อคน / ชื่อร้าน
+// ตัวช่วยทั่วไป
 // ------------------------------------------------------------------------
-function splitNameAndBusiness(line) {
-  const match = line.match(BUSINESS_KEYWORD_RE);
-  if (!match) return { personal: line, business: "" };
-  const idx = match.index;
-  return {
-    personal: line.slice(0, idx).trim(),
-    business: line.slice(idx).trim()
-  };
+function escapeHTML(str) {
+  return String(str == null ? "" : str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+const escapeAttr = escapeHTML;
 
+// FIX (#15): รองรับเบอร์บ้าน 9 หลัก (02-xxx-xxxx)
 function normalizePhoneDigits(rawPhone) {
-  const digits = rawPhone.replace(/[^\d]/g, "");
-  return digits.length === 10
-    ? `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
-    : digits;
+  const d = rawPhone.replace(/[^\d]/g, "");
+  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  if (d.length === 9) return `${d.slice(0, 2)}-${d.slice(2, 5)}-${d.slice(5)}`;
+  return d;
 }
 
-// เช็คว่าข้อความเป็นเบอร์โทรไทยไหม (ใช้ตอนตัดสินใจว่าของใน ( ) / [ ] คือเบอร์หรือโน้ต)
+// FIX (#15): ต้องเป็น "เบอร์ล้วน ๆ" เท่านั้น — ถ้ามีข้อความอื่นปน (ฝากไว้ 081-...) ถือเป็นโน้ต
 function looksLikePhoneNumber(text) {
-  const digits = text.replace(/[^\d]/g, "");
-  return /^0\d{8,9}$/.test(digits);
+  return PHONE_ONLY_RE.test(String(text).trim());
 }
 
-// ตัดคำนำหน้าชื่อทุกแบบทิ้ง แล้วขึ้นต้นด้วย "คุณ" ให้เหมือนกันหมดทุกคน
-const TITLE_RE = /^(นางสาว|นาย|นาง|น\.ส\.|ดร\.|นพ\.|พญ\.|ด\.ช\.|ด\.ญ\.|คุณหญิง|จัดส่ง|กรุณาจัดส่ง|ส่ง|คุณ|Mrs\.?|Mr\.?|Miss\.?|Ms\.?|Dr\.?|K\.)\s*/i;
-
+// FIX (#5): ตัดคำนำหน้าซ้ำจนไม่เจอ ("กรุณาจัดส่ง คุณสมชาย" -> "สมชาย")
 function normalizeNameTitle(name) {
   if (!name) return name;
-  const stripped = name.replace(TITLE_RE, "").trim();
-  return stripped ? `คุณ ${stripped}` : name;
+  let s = name.trim(), prev;
+  do { prev = s; s = s.replace(TITLE_RE, "").trim(); } while (s !== prev && s);
+  return s ? `คุณ ${s}` : name;
 }
 
-// รวม logic แยกชื่อคน/ชื่อร้าน + ทำให้ชื่อคนขึ้นต้นด้วย "คุณ" เสมอ
-function resolveNameAndBusiness(rawLine) {
-  const split = splitNameAndBusiness(rawLine);
-  if (split.personal) {
-    return { name: normalizeNameTitle(split.personal), business: split.business };
+// FIX (#13): แยกชื่อสถานที่ภาษาอังกฤษ/ชื่อร้านที่ไม่มีคำว่า "ร้าน"
+function splitVenueName(text) {
+  // "นะโม walkin mansion" -> นะโม | walkin mansion
+  let m = text.match(/^([ก-๙]+)\s+([A-Za-z][A-Za-z0-9 .&'\-]*)$/);
+  if (m && ENGLISH_VENUE_RE.test(m[2])) return { personal: m[1], business: m[2].trim() };
+  // "Butter บัวแอนด์บอลเฮ้าท์" -> Butter | บัวแอนด์บอลเฮ้าท์
+  m = text.match(/^([A-Za-z][A-Za-z.\-]*)\s+([ก-๙][ก-๙A-Za-z0-9&.\-]*)$/);
+  if (m && !/^(?:Mr|Mrs|Miss|Ms|Dr|K)\.?$/i.test(m[1]) && THAI_VENUE_RE.test(m[2])) {
+    return { personal: m[1], business: m[2] };
   }
+  return null;
+}
+
+function splitNameAndBusiness(line) {
+  const match = line.match(BUSINESS_KEYWORD_RE);
+  if (match) {
+    return { personal: line.slice(0, match.index).trim(), business: line.slice(match.index).trim() };
+  }
+  const venue = splitVenueName(line);
+  if (venue) return venue;
+  return { personal: line, business: "" };
+}
+
+function resolveNameAndBusiness(rawLine) {
+  const line = String(rawLine || "").trim().replace(/[,\s]+$/, "");
+  const split = splitNameAndBusiness(line);
+  let personal = split.personal;
+  if (STRIP_NAME_NICKNAME) {
+    const stripped = personal.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    if (stripped) personal = stripped;
+  }
+  if (personal) return { name: normalizeNameTitle(personal), business: split.business };
   return { name: split.business, business: "" };
 }
 
+// FIX (#10): ลบป้าย "xxx ส่งที่" / "ส่งที่:" ที่ไม่ใช่ชื่อ
+function stripLabels(s) {
+  return String(s || "")
+    .replace(/^[^\n]*ส่ง(?:ไป)?ที่[ \t:]*$/gm, "")
+    .replace(/ส่ง(?:ไป)?ที่[ \t]*:?[ \t]*/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // ------------------------------------------------------------------------
-// โหมด A: ข้อมูลลูกค้าพิมพ์แยกบรรทัดชัดเจน (ชื่อ / เบอร์ / ที่อยู่ / [โน้ต])
+// โหมด A: ข้อมูลลูกค้าพิมพ์แยกบรรทัด (ชื่อ / เบอร์ / ที่อยู่ / [โน้ต])
 // ------------------------------------------------------------------------
 function parseCustomerData(raw) {
   const lines = raw.split("\n").map(l => l.trim()).filter(l => l);
 
-  let name = "";
-  let business = "";
-  let phone = "";
-  let note = "";
+  let name = "", business = "", phone = "";
+  const notes = [];
   const address = [];
 
-  lines.forEach((line, idx) => {
-  const phoneMatch = line.match(PHONE_RE);
+  lines.forEach(rawLine => {
+    let line = rawLine.replace(/^(?:ชื่อ(?:ผู้รับ)?|ที่อย[ุู]่)\s*:?\s*/, "");
 
-  if (phoneMatch) {
-    phone = phoneMatch[0];
+    // [ ] = โน้ต (ดึงออกก่อน ส่วนที่เหลือของบรรทัดประมวลผลต่อ)
+    line = line.replace(/\[([^\]]*)\]/g, (m, inner) => {
+      const t = inner.trim();
+      if (t) {
+        if (!phone && looksLikePhoneNumber(t)) phone = normalizePhoneDigits(t);
+        else notes.push(t);
+      }
+      return " ";
+    });
 
-    // ❌ ไม่ใช้ line นี้เป็นชื่ออีกต่อไป
-    return;
-  }
+    // FIX (#6): ดึงเบอร์ออกจากบรรทัด แล้วใช้ส่วนที่เหลือเป็นชื่อ/ที่อยู่ ไม่ทิ้งทั้งบรรทัด
+    const pm = line.match(FREEFORM_PHONE_RE);
+    if (pm) {
+      if (!phone) phone = normalizePhoneDigits(pm[1]);
+      line = line.slice(0, pm.index) + " " + line.slice(pm.index + pm[0].length);
+    }
+    line = line.replace(/\s+/g, " ").trim();
+    if (!line) return;
 
-  if (line.includes("[") && line.includes("]")) {
-    note = line.replace(/^\[|\]$/g, "");
-    return;
-  }
+    const looksLikeAddress = /^\d/.test(line) || line.search(ADDRESS_START_RE) === 0;
+    if (!name && !looksLikeAddress) {
+      const r = resolveNameAndBusiness(line);
+      name = r.name;
+      business = r.business;
+      return;
+    }
+    address.push(line);
+  });
 
-  if (!name) {
-    const resolved = resolveNameAndBusiness(line);
-    name = resolved.name;
-    business = resolved.business;
-    return;
-  }
-
-  address.push(line);
-});
-
+  const note = notes.join(" / ");
   return { name, business, phone, note: note ? `[${note}]` : "", address };
 }
 
 // ------------------------------------------------------------------------
-// โหมด B: ข้อความก้อนเดียว ไม่มีขึ้นบรรทัดใหม่เลย (ชื่อ+ที่อยู่+เบอร์+โน้ตปนกัน)
+// โหมด B: ข้อความก้อนเดียว (ชื่อ+ที่อยู่+เบอร์+โน้ตปนกัน)
 // ------------------------------------------------------------------------
 function parseShippingBlob(raw) {
-  let working = raw.replace(/\s+/g, " ").trim();
+  // FIX (#8): ล้าง ":" / ช่องว่างหน้าข้อมูล (เหลือจากการตัดป้าย "ที่อยู่:" ฯลฯ)
+  let working = String(raw || "").replace(/\s+/g, " ").trim().replace(/^[\s:：]+/, "");
+  // FIX (#3): +66 81 234 5678 -> 081 234 5678
+  working = working.replace(/(?<!\d)\+66[\s-]*\(?0?\)?[\s-]*(?=[1-9])/g, "0");
 
   let phone = "";
+  const notes = [];
 
-  // FIX (#4): วงเล็บเหลี่ยม [ ] กับวงเล็บกลม ( ) มีความหมายคนละแบบ ต้องแยก logic กัน
-  // ห้ามใช้ regex เดียวจับทั้งคู่แล้วเอาแค่ "วงเล็บแรกที่เจอ" เพราะถ้าในบรรทัดมีวงเล็บ
-  // สองคู่ (เช่น "... (CEO) ... [ฝากไว้กับน้องๆที่ร้านได้เลยค่ะ] ...") วงเล็บที่เจอก่อน
-  // จะไปแย่งที่ของโน้ตตัวจริง แล้วโน้ตตัวจริงจะหายไปเลย
-
-  // 4a) วงเล็บเหลี่ยม [ ] = ช่องโน้ตที่ตั้งใจไว้จริง ๆ ดึงออกมาเป็นโน้ตเสมอ
-  //     (เผื่อไว้กรณีคนพิมพ์ดันใส่เบอร์โทรไว้ใน [ ] แทนโน้ต ก็ยังรองรับ)
-  let bracketNote = "";
-  const noteMatch = working.match(/\[([^\]]+)\]/);
-  if (noteMatch) {
-    const noteContent = noteMatch[1].trim();
-    if (looksLikePhoneNumber(noteContent)) {
-      phone = normalizePhoneDigits(noteContent);
-    } else {
-      bracketNote = noteContent;
+  // 4a) [ ] = ช่องโน้ต วนทุกคู่ (ถ้าข้างในเป็นเบอร์ล้วน ๆ ถือเป็นเบอร์)
+  working = working.replace(/\[([^\]]*)\]/g, (m, inner) => {
+    const t = inner.trim();
+    if (t) {
+      if (!phone && looksLikePhoneNumber(t)) phone = normalizePhoneDigits(t);
+      else notes.push(t);
     }
-    working = (
-      working.slice(0, noteMatch.index) + " " +
-      working.slice(noteMatch.index + noteMatch[0].length)
-    ).replace(/\s+/g, " ").trim();
-  }
+    return " ";
+  });
 
-  // 4b) วงเล็บกลม ( ) = ดึงออกมา "เฉพาะ" กรณีข้างในเป็นเบอร์โทรจริง ๆ เท่านั้น เช่น "(0937718642)"
-  //     ถ้าข้างในเป็นข้อความอื่น เช่น "(CEO)" ให้ปล่อยผ่านไปเฉย ๆ อย่าดึงออกมาเป็นโน้ต
-  //     เดี๋ยวคำแบบ "(CEO)" จะติดไปกับชื่อ/ชื่อร้านตามธรรมชาติแทน ไม่หายไปไหน
+  // 4b) ( ) = เอาออกเฉพาะที่เป็นเบอร์จริง — FIX (#2): วนทุกคู่ ไม่ใช่แค่คู่แรก
+  working = working.replace(/\(([^()]*)\)/g, (m, inner) => {
+    if (!phone && looksLikePhoneNumber(inner)) {
+      phone = normalizePhoneDigits(inner);
+      return " ";
+    }
+    return m; // เช่น (CEO) (เตย) ปล่อยไว้
+  });
+  working = working.replace(/\s+/g, " ").trim();
+
+  // เบอร์ที่เขียนอิสระ (มีหรือไม่มีคำนำหน้า)
   if (!phone) {
-    const parenMatch = working.match(/\(([^)]+)\)/);
-    if (parenMatch && looksLikePhoneNumber(parenMatch[1])) {
-      phone = normalizePhoneDigits(parenMatch[1]);
-      working = (
-        working.slice(0, parenMatch.index) + " " +
-        working.slice(parenMatch.index + parenMatch[0].length)
-      ).replace(/\s+/g, " ").trim();
+    const pm = working.match(FREEFORM_PHONE_RE);
+    if (pm) {
+      phone = normalizePhoneDigits(pm[1]);
+      working = (working.slice(0, pm.index) + " " + working.slice(pm.index + pm[0].length))
+        .replace(/\s+/g, " ").trim();
     }
   }
 
-  // ดึงเบอร์โทร (ไม่ว่าจะอยู่ตรงไหนของประโยค) — ข้ามถ้าได้เบอร์จากวงเล็บไปแล้ว
-  if (!phone) {
-    const phoneMatch = working.match(FREEFORM_PHONE_RE);
-    if (phoneMatch) {
-      phone = normalizePhoneDigits(phoneMatch[1]);
-      working = (
-        working.slice(0, phoneMatch.index) + " " +
-        working.slice(phoneMatch.index + phoneMatch[0].length)
-      ).replace(/\s+/g, " ").trim();
-    }
+  // หาตำแหน่งตัดชื่อ
+  let nameEndIdx = working.search(ADDRESS_START_RE);
+  if (nameEndIdx === -1) nameEndIdx = working.search(/\d/);
+
+  const inst = working.match(INSTITUTION_KEYWORD_RE);
+  if (inst && inst.index > 0 && (nameEndIdx === -1 || inst.index < nameEndIdx)) {
+    nameEndIdx = inst.index;
   }
 
-  // หาตำแหน่งตัดชื่อ โดยมองหาคำที่บ่งบอกถึง "ที่อยู่" ชัดเจน (เช่น บ้านเลขที่, เลขที่, หมู่ ฯลฯ)
-  let nameEndIdx = -1;
-  const matchAddrStart = working.search(ADDRESS_START_RE);
-
-  if (matchAddrStart !== -1) {
-    nameEndIdx = matchAddrStart;
-  } else {
-    // ถ้าไม่เจอคำชัดเจน ค่อยใช้ตัวเลขตัวแรกตามเดิม
-    nameEndIdx = working.search(/\d/);
-  }
-
-  // เช็คเรื่องหน่วยงานราชการ/ทหารเพิ่มเติม
-  const instMatch = working.match(INSTITUTION_KEYWORD_RE);
-  if (instMatch && instMatch.index > 0 && (nameEndIdx === -1 || instMatch.index < nameEndIdx)) {
-    nameEndIdx = instMatch.index;
-  }
-
-  let nameRaw = working;
-  let rest = "";
+  let nameRaw = working, rest = "";
   if (nameEndIdx > 0) {
     nameRaw = working.slice(0, nameEndIdx).trim().replace(/,\s*$/, "");
     rest = working.slice(nameEndIdx).trim();
@@ -222,26 +337,39 @@ function parseShippingBlob(raw) {
     rest = working;
   }
 
-  const resolved = resolveNameAndBusiness(nameRaw);
-  const name = resolved.name;
-  const business = resolved.business;
+  const { name, business } = resolveNameAndBusiness(nameRaw);
 
-  // ที่อยู่ตัดจบตรงรหัสไปรษณีย์ (เลข 5 หลัก) ส่วนที่เหลือถือเป็นโน้ต
+  // FIX (#10): "ส่ง Mr.bag ..." ตัดคำว่า ส่ง นำหน้าที่อยู่ทิ้ง
+  rest = rest.replace(/^ส่ง\s+/, "");
+
+  // ที่อยู่ตัดจบที่รหัสไปรษณีย์ 5 หลัก ส่วนที่เหลือ = โน้ต
+  // FIX (#11): ถ้าส่วนท้ายขึ้นต้นด้วย "," แปลว่ายังเป็นที่อยู่ (รูปแบบ Google Maps)
   let address = rest;
   let noteFromTail = "";
-  const zipMatch = rest.match(/^(.*?\b\d{5}\b)([\s\S]*)$/);
+  const zipMatch = rest.match(/^(.*?(?<!\d)\d{5}(?!\d))([\s\S]*)$/);
   if (zipMatch) {
-    address = zipMatch[1].trim().replace(/,\s*$/, "");
-    noteFromTail = zipMatch[2].trim();
+    const tail = zipMatch[2];
+    if (/^\s*,/.test(tail)) {
+      address = rest;
+    } else {
+      address = zipMatch[1].trim();
+      noteFromTail = tail.trim();
+    }
   }
-  noteFromTail = noteFromTail.replace(/^(?:ค่ะ|ค่า+|คะ|ครับ)+[\s,]*/, "").trim();
+  address = address.replace(/[,\s]+$/, "")
+    .replace(/((?:แขวง|เขต|ตำบล|อำเภอ)\S+)\s+\1/g, "$1"); // ต้นฉบับพิมพ์ซ้ำ
 
-  const note = bracketNote || noteFromTail;
+  noteFromTail = noteFromTail
+    .replace(/^(?:ค่ะ|ค่า+|คะ|ครับ)+[\s,]*/, "")
+    .replace(/^\((.*)\)$/, "$1") // FIX (#15): ไม่ให้เป็น [( ... )]
+    .trim();
+  if (noteFromTail) notes.push(noteFromTail);
+
+  // FIX (#15): โน้ตจาก [ ] และจากท้ายข้อความ ต่อกัน ไม่ทิ้งอันใดอันหนึ่ง
+  const note = notes.join(" / ");
 
   return {
-    name,
-    business,
-    phone,
+    name, business, phone,
     note: note ? `[${note}]` : "",
     address: address ? [address] : []
   };
@@ -251,26 +379,38 @@ function parseShippingBlob(raw) {
 // โหมด C: ก้อนข้อความรวมหลายออเดอร์ คั่นด้วยเส้นประ
 // ------------------------------------------------------------------------
 function extractShippingBlob(block) {
-  let idx = block.search(/ที่อยู่/);
-  if (idx !== -1) return block.slice(idx + "ที่อยู่".length).trim();
+  // FIX (#8): รับ "ที่อยู่" และ "ที่อยุ่" (พิมพ์ผิดบ่อย) + ตัด ":" และรองรับ "ชื่อ ... ที่อยู่ ..."
+  const addrLabel = block.match(/ที่อย[ุู]่\s*:?/);
+  const nameLabel = block.match(/ชื่อ(?:ผู้รับ)?(?:\s*:\s*|\s+)/);
 
-  idx = block.search(/ชื่อ\s/);
-  if (idx !== -1) return block.slice(idx + "ชื่อ".length).trim();
-
-  const ttMatch = block.match(/ตต\s*(\S+)/);
-  if (ttMatch) {
-    const cutIdx = ttMatch.index + ttMatch[0].length;
-    return block.slice(cutIdx).trim();
+  if (addrLabel) {
+    const after = block.slice(addrLabel.index + addrLabel[0].length);
+    if (nameLabel && nameLabel.index < addrLabel.index) {
+      const nameText = block.slice(nameLabel.index + nameLabel[0].length, addrLabel.index).trim();
+      return (nameText + " " + after).trim();
+    }
+    return after.trim();
   }
 
-  // ตัดส่วน "รายการสินค้า" ทิ้ง โดยหาบรรทัดค่าส่งแบบ "ส่ง <ตัวเลข>" หรือ "วิน <ตัวเลข>"
-  // แพทเทิร์นนี้ครอบคลุมข้อมูลแบบ: รายการสินค้า(หลายบรรทัด) -> ส่ง/วิน XX -> บรรทัดว่าง -> ข้อมูลลูกค้า
+  if (nameLabel) return block.slice(nameLabel.index + nameLabel[0].length).trim();
+
+  // FIX (#5): "ตต" ต้องขึ้นต้นคำ (ปัตตานี, ภัตตาคาร ไม่โดน)
+  const ttMatch = block.match(/(?:^|\s)ตต\s*(\S+)/);
+  if (ttMatch) {
+    return block.slice(ttMatch.index + ttMatch[0].length).trim();
+  }
+
+  // ตัดรายการสินค้าทิ้งด้วยบรรทัดค่าส่ง (ส่ง/วิน/ค่าส่ง/Grab/ส่งฟรี ...)
   const shipFeeMatch = block.match(SHIPPING_FEE_LINE_RE);
   if (shipFeeMatch) {
     return block.slice(shipFeeMatch.index + shipFeeMatch[0].length).trim();
   }
 
-  const totalMatches = [...block.matchAll(/รวม(?:ทั้งหมด|ท้ั้งหมด)?[\d\s+=,.]*/g)];
+  // FIX (#7): "รวม" ต้องตามด้วยตัวเลขจริง และห้ามข้ามบรรทัด (ไม่กินเลขบ้านบรรทัดถัดไป,
+  //           ไม่ชนคำว่า รวมใจ/รวมสุข)
+  const totalRe =
+    /รวม(?:ทั้งหมด|ท้ั้งหมด)?[ \t]*\d[\d,.]*(?:[ \t]*[+=][ \t]*\d[\d,.]*)*(?:[ \t]*(?:บาท|฿))?/g;
+  const totalMatches = [...block.matchAll(totalRe)];
   if (totalMatches.length) {
     const last = totalMatches[totalMatches.length - 1];
     return block.slice(last.index + last[0].length).trim();
@@ -279,9 +419,16 @@ function extractShippingBlob(block) {
   return block;
 }
 
-function parseBulkOrders(raw) {
+// FIX (#12): ข้ามก้อนที่ไม่ใช่ออเดอร์ (ไม่มีทั้งเบอร์และที่อยู่) แล้วบอกจำนวนที่ข้าม
+function parseBulkOrdersDetailed(raw) {
   const blocks = raw.split(/[-–—_]{2,}/g).map(b => b.trim()).filter(b => b);
-  return blocks.map(block => parseShippingBlob(extractShippingBlob(block)));
+  const parsed = blocks.map(block => parseShippingBlob(stripLabels(extractShippingBlob(block))));
+  const orders = parsed.filter(d => d.phone || d.address.length);
+  return { orders, skipped: parsed.length - orders.length };
+}
+
+function parseBulkOrders(raw) {
+  return parseBulkOrdersDetailed(raw).orders;
 }
 
 // ------------------------------------------------------------------------
@@ -323,16 +470,9 @@ function renderReviewPanel() {
   `;
 }
 
-function escapeAttr(str) {
-  return String(str || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
-function removeReviewItem(idx) {
-  pendingReview.splice(idx, 1);
-  renderReviewPanel();
-}
-
-function confirmReview() {
+// FIX (#9): อ่านค่าที่ผู้ใช้แก้ในช่องกลับเข้า pendingReview ก่อน render ใหม่ทุกครั้ง
+function syncReviewFromDOM() {
+  if (typeof document === "undefined") return;
   document.querySelectorAll("#reviewPanel [data-field]").forEach(el => {
     const idx = parseInt(el.dataset.idx, 10);
     const field = el.dataset.field;
@@ -347,7 +487,16 @@ function confirmReview() {
       pendingReview[idx][field] = el.value.trim();
     }
   });
+}
 
+function removeReviewItem(idx) {
+  syncReviewFromDOM();
+  pendingReview.splice(idx, 1);
+  renderReviewPanel();
+}
+
+function confirmReview() {
+  syncReviewFromDOM();
   pendingReview.forEach(data => orderList.push({ id: nextOrderId(), data }));
   pendingReview = [];
   renderReviewPanel();
@@ -363,16 +512,17 @@ function cancelReview() {
 // ------------------------------------------------------------------------
 // Render
 // ------------------------------------------------------------------------
+// FIX (#15): escape ทุกช่องก่อนใส่ innerHTML (ชื่อ/ที่อยู่ที่มี < หรือ & ป้ายไม่พังแล้ว)
 function buildReceiverInnerHTML(data) {
   const phoneText = data.phone ? "โทร. " + data.phone : "";
   return `
     <div class="line1">
       <span class="rlabel">กรุณาส่ง</span>
-      <span class="namephone">${data.name}${phoneText ? " " + phoneText : ""}</span>
+      <span class="namephone">${escapeHTML(data.name)}${phoneText ? " " + escapeHTML(phoneText) : ""}</span>
     </div>
-    ${data.business ? `<div class="business">${data.business}</div>` : ""}
-    <div class="address">${data.address.join("<br>")}</div>
-    ${data.note ? `<div class="note">${data.note}</div>` : ""}
+    ${data.business ? `<div class="business">${escapeHTML(data.business)}</div>` : ""}
+    <div class="address">${data.address.map(escapeHTML).join("<br>")}</div>
+    ${data.note ? `<div class="note">${escapeHTML(data.note)}</div>` : ""}
   `;
 }
 
@@ -387,8 +537,8 @@ function renderAllPages() {
 
   const senderHTML = buildSenderHTML();
 
-  for (let i = 0; i < orderList.length; i += 3) {
-    const pageItems = orderList.slice(i, i + 3);
+  for (let i = 0; i < orderList.length; i += LABELS_PER_PAGE) {
+    const pageItems = orderList.slice(i, i + LABELS_PER_PAGE);
     const page = document.createElement("div");
     page.className = "a4-page";
 
@@ -406,7 +556,7 @@ function renderAllPages() {
       page.appendChild(labelDiv);
     });
 
-    while (page.children.length < 3) {
+    while (page.children.length < LABELS_PER_PAGE) {
       const empty = document.createElement("div");
       empty.className = "label empty";
       page.appendChild(empty);
@@ -415,15 +565,17 @@ function renderAllPages() {
     container.appendChild(page);
   }
 
+  // FIX (#15): QR 50px เล็กไปสำหรับสแกนจากกระดาษ -> 64px + แก้ error ระดับต่ำ (โมดูลใหญ่ขึ้น)
+  // ถ้าขนาดกล่อง .qr ใน CSS ถูกล็อกไว้ 50px ให้แก้เป็น 64px ด้วย
   orderList.forEach(item => {
     const qrEl = document.getElementById("qr-" + item.id);
     if (qrEl && window.QRCode) {
       qrEl.innerHTML = "";
       new QRCode(qrEl, {
         text: `${item.id}|${item.data.phone}`,
-        width: 50,
-        height: 50,
-        correctLevel: QRCode.CorrectLevel.M
+        width: 64,
+        height: 64,
+        correctLevel: QRCode.CorrectLevel.L
       });
     }
   });
@@ -432,19 +584,11 @@ function renderAllPages() {
 }
 
 function updateStatus() {
-  const pageCount = Math.ceil(orderList.length / 3) || 0;
+  const pageCount = Math.ceil(orderList.length / LABELS_PER_PAGE) || 0;
   document.getElementById("status").innerText =
     orderList.length === 0
       ? "ยังไม่มีป้าย — เลขที่ออเดอร์ถัดไป: " + nextOrderIdPreview()
       : `ป้ายทั้งหมด: ${orderList.length} ใบ (${pageCount} หน้า A4) — เลขที่ออเดอร์ถัดไป: ${nextOrderIdPreview()}`;
-}
-
-function nextOrderIdPreview() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}${m}${d}-${String(orderSeqCounter).padStart(3, "0")}`;
 }
 
 // ------------------------------------------------------------------------
@@ -475,15 +619,17 @@ function addBulkOrders() {
     return;
   }
 
-  const dataList = parseBulkOrders(raw);
-  if (dataList.length === 0) {
+  const { orders, skipped } = parseBulkOrdersDetailed(raw);
+  if (orders.length === 0) {
     alert("แยกออเดอร์ไม่เจอเลยครับ ลองเช็คว่ามีเส้นคั่น (----) ระหว่างแต่ละออเดอร์ไหม");
     return;
   }
 
-  pendingReview = pendingReview.concat(dataList);
+  syncReviewFromDOM(); // FIX (#9): เก็บค่าที่แก้ค้างไว้ก่อนเติมรายการใหม่
+  pendingReview = pendingReview.concat(orders);
   input.value = "";
   renderReviewPanel();
+  if (skipped > 0) alert(`ข้าม ${skipped} รายการที่ไม่มีทั้งเบอร์โทรและที่อยู่ (เช่น โน้ตที่ไม่ใช่ออเดอร์)`);
   document.getElementById("reviewPanel").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -495,7 +641,19 @@ function resetAll() {
   renderAllPages();
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  updateStatus();
-  renderReviewPanel();
-});
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  window.addEventListener("DOMContentLoaded", () => {
+    loadSeq();
+    updateStatus();
+    renderReviewPanel();
+  });
+}
+
+// สำหรับรันเทสต์ใน Node (เบราว์เซอร์ไม่กระทบ)
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    parseShippingBlob, parseCustomerData, parseBulkOrders, parseBulkOrdersDetailed,
+    extractShippingBlob, stripLabels, normalizeNameTitle, normalizePhoneDigits,
+    looksLikePhoneNumber, resolveNameAndBusiness
+  };
+}
