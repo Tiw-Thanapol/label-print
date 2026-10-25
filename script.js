@@ -1,6 +1,6 @@
 // ========================================================================
 // ระบบพิมพ์ใบปะหน้าพัสดุ — รองรับวางออเดอร์หลายรายการพร้อมกัน + Order ID/QR
-// ฉบับรวมแก้ทั้งหมด (v3) — ดูรายการ "FIX" ท้ายไฟล์คอมเมนต์นี้
+// ฉบับรวมแก้ทั้งหมด (v4) — ดูรายการ "FIX" ด้านล่าง
 //
 // แก้จากรอบก่อน (ตัวเลขอ้างอิงตรงกับคอมเมนต์ "FIX:" ในโค้ด)
 //  #1  "วิน" นับเป็นบรรทัดค่าส่ง (+ ส่งฟรี / ค่าส่ง / Grab / Lalamove ...)
@@ -17,7 +17,9 @@
 //  #12 ข้ามก้อนที่ไม่ใช่ออเดอร์ (ไม่มีทั้งเบอร์และที่อยู่) แล้วแจ้งผู้ใช้
 //  #13 ชื่อร้านภาษาอังกฤษ/ชื่อคอนโดที่ไม่มีคำว่า "ร้าน" แยกเป็น business
 //  #14 เลข Order ID เก็บใน localStorage + รีเซ็ตข้ามวัน
-//  #15 escape HTML, โน้ตไม่หาย, เบอร์บ้าน 9 หลัก, QR ใหญ่ขึ้น ฯลฯ
+//  #15 escape HTML, โน้ตไม่หาย, เบอร์บ้าน 9 หลัก ฯลฯ
+//  #16 รูปแบบ "ที่อยู่ก่อน ชื่อทีหลัง" (ชื่อคนอยู่หลังรหัสไปรษณีย์) + หอพัก/อพาร์ทเม้นท์ = ที่อยู่
+//  #17 จำนวนป้ายต่อหน้าตั้งได้ที่ LABELS_PER_PAGE (ตอนนี้ 4 ป้าย/หน้า)
 // ========================================================================
 
 let orderList = [];      // { id, data } ทั้งหมดที่จะพิมพ์
@@ -27,6 +29,9 @@ let pendingReview = [];  // { data } ที่แยกแล้วแต่ย�
 
 // ตั้งเป็น false ถ้าอยากให้ชื่อเล่นในวงเล็บท้ายชื่อ เช่น "ธนพร แก่นกอ (เตย)" ขึ้นบนป้ายด้วย
 const STRIP_NAME_NICKNAME = false;
+
+// FIX (#17): จำนวนป้ายต่อหน้า A4 (CSS ของ .label ต้องสอดคล้อง: 4 ป้าย = height 25%, 3 ป้าย = 33.33%)
+const LABELS_PER_PAGE = 3;
 
 // ------------------------------------------------------------------------
 // Regex กลาง
@@ -77,6 +82,7 @@ const ADDRESS_START_RE = new RegExp([
   "(?<![A-Za-z])The(?![A-Za-z])",
   "เดอะ",
   "โครงการ", "หมู่บ้าน", "บ้านพัก",
+  "หอพัก", "อพาร์ท(?:เม้นท์|เมนต์|เมนท์)", "แมนชั่น", "โรงแรม", "รีสอร์ท",
   "คอนโด(?:มิเนียม)?", "อาคาร", "ตึก",
   "บ้านเลขที่", "เลขที่", "หมู่ที่", "หมู่\\s+",
   "\\b\\d{1,3}\\/\\d+",
@@ -103,6 +109,25 @@ const TITLE_RE = new RegExp(
     "(?:Mrs|Mr|Miss|Ms|Dr)(?:\\.\\s*|\\s+)|K\\.\\s*" +
   ")\\s*", "i"
 );
+
+// FIX (#16): รูปแบบ "ที่อยู่ก่อน ชื่อทีหลัง" เช่น
+//   "หอพักสตรี ... 44150 นางสาวณัฐนรี จิตไพศาล 0932425144"
+//   ข้อความหลังรหัสไปรษณีย์ที่เป็นชื่อคน ต้องเป็นชื่อ ไม่ใช่โน้ต
+const NAME_TITLE_RE = new RegExp(
+  "^(?:(?:นางสาว|นาย|นาง|คุณหญิง|คุณ)" + THAI_NON_LEADING +
+  "|น\\.ส\\.|ดร\\.|นพ\\.|พญ\\.|ด\\.ช\\.|ด\\.ญ\\.|(?:Mrs|Mr|Miss|Ms|Dr)(?:\\.\\s*|\\s+)|K\\.\\s*)", "i"
+);
+const NOTE_HINT_RE = /(ฝาก|โทร|ก่อน|ถึง|ด้วย|รบกวน|ห้าม|หน้า|หลัง|ตรง|ค่ะ|ครับ|คะ|ที่|ถ้า|ไม่|ให้|ส่ง)/;
+
+function looksLikeNameTail(tail, nameRaw) {
+  const t = String(tail || "").trim();
+  if (!t || /\d/.test(t) || /[\[\](){}]/.test(t)) return false;
+  const tokens = t.split(/\s+/);
+  // มีคำนำหน้าชื่อ (นางสาว/นาย/คุณ ...) และช่วงหน้าไม่ใช่ชื่อที่มีคำนำหน้าอยู่แล้ว
+  if (NAME_TITLE_RE.test(t)) return tokens.length <= 5 && !NAME_TITLE_RE.test(nameRaw || "");
+  // ไม่มีคำนำหน้า: ใช้ต่อเมื่อช่วงหน้าไม่มีชื่อเลย และข้อความสั้นไม่เหมือนโน้ต
+  return !nameRaw && tokens.length <= 3 && !NOTE_HINT_RE.test(t);
+}
 
 // ------------------------------------------------------------------------
 // Order ID  (FIX #14: เก็บใน localStorage + รีเซ็ตข้ามวันอัตโนมัติ)
@@ -337,8 +362,6 @@ function parseShippingBlob(raw) {
     rest = working;
   }
 
-  const { name, business } = resolveNameAndBusiness(nameRaw);
-
   // FIX (#10): "ส่ง Mr.bag ..." ตัดคำว่า ส่ง นำหน้าที่อยู่ทิ้ง
   rest = rest.replace(/^ส่ง\s+/, "");
 
@@ -363,7 +386,17 @@ function parseShippingBlob(raw) {
     .replace(/^(?:ค่ะ|ค่า+|คะ|ครับ)+[\s,]*/, "")
     .replace(/^\((.*)\)$/, "$1") // FIX (#15): ไม่ให้เป็น [( ... )]
     .trim();
+
+  // FIX (#16): ถ้าส่วนท้ายคือชื่อคน ให้ใช้เป็นชื่อ และเอาส่วนหน้า (เช่น ชื่อหอพัก) ไปไว้ที่อยู่
+  let nameSource = nameRaw;
+  if (noteFromTail && looksLikeNameTail(noteFromTail, nameRaw)) {
+    if (nameRaw) address = (nameRaw + " " + address).trim();
+    nameSource = noteFromTail;
+    noteFromTail = "";
+  }
   if (noteFromTail) notes.push(noteFromTail);
+
+  const { name, business } = resolveNameAndBusiness(nameSource);
 
   // FIX (#15): โน้ตจาก [ ] และจากท้ายข้อความ ต่อกัน ไม่ทิ้งอันใดอันหนึ่ง
   const note = notes.join(" / ");
@@ -537,8 +570,8 @@ function renderAllPages() {
 
   const senderHTML = buildSenderHTML();
 
-  for (let i = 0; i < orderList.length; i += 3) {
-    const pageItems = orderList.slice(i, i + 3);
+  for (let i = 0; i < orderList.length; i += LABELS_PER_PAGE) {
+    const pageItems = orderList.slice(i, i + LABELS_PER_PAGE);
     const page = document.createElement("div");
     page.className = "a4-page";
 
@@ -556,7 +589,7 @@ function renderAllPages() {
       page.appendChild(labelDiv);
     });
 
-    while (page.children.length < 3) {
+    while (page.children.length < LABELS_PER_PAGE) {
       const empty = document.createElement("div");
       empty.className = "label empty";
       page.appendChild(empty);
@@ -565,16 +598,16 @@ function renderAllPages() {
     container.appendChild(page);
   }
 
-  // FIX (#15): QR 50px เล็กไปสำหรับสแกนจากกระดาษ -> 64px + แก้ error ระดับต่ำ (โมดูลใหญ่ขึ้น)
-  // ถ้าขนาดกล่อง .qr ใน CSS ถูกล็อกไว้ 50px ให้แก้เป็น 64px ด้วย
+  // QR 50px ให้ตรงกับ CSS (.qr ล็อก 50px) + ใช้ error correction ระดับ L ให้โมดูลใหญ่ขึ้น สแกนง่ายขึ้น
+  // ถ้าจะขยายเป็น 64px ต้องแก้ CSS ของ .order-meta .qr (3 จุด) ให้ตรงกันด้วย
   orderList.forEach(item => {
     const qrEl = document.getElementById("qr-" + item.id);
     if (qrEl && window.QRCode) {
       qrEl.innerHTML = "";
       new QRCode(qrEl, {
         text: `${item.id}|${item.data.phone}`,
-        width: 64,
-        height: 64,
+        width: 50,
+        height: 50,
         correctLevel: QRCode.CorrectLevel.L
       });
     }
@@ -584,7 +617,7 @@ function renderAllPages() {
 }
 
 function updateStatus() {
-  const pageCount = Math.ceil(orderList.length / 3) || 0;
+  const pageCount = Math.ceil(orderList.length / LABELS_PER_PAGE) || 0;
   document.getElementById("status").innerText =
     orderList.length === 0
       ? "ยังไม่มีป้าย — เลขที่ออเดอร์ถัดไป: " + nextOrderIdPreview()
